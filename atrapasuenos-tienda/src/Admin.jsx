@@ -6,19 +6,35 @@ function Admin() {
     personaje: '',
     descripcion: '',
     precio: '',
-    imagen: ''
+    imagen: '',
+    categoria: 'Dama',
+    seccion_destino: 'Promos'
   });
+  
+  const [bannerConfig, setBannerConfig] = useState({
+    descripcion: '• 1 Pijama: Envío estándar ($15.000)\n• 2 Pijamas: Envío $19.900\n• 3 o más Pijamas: 10% DE DESCUENTO + ENVÍO GRATIS',
+    precio: '🚀 ¡Lleva 2 o más pijamas y el envío es totalmente GRATIS!'
+  });
+
   const [tallasSeleccionadas, setTallasSeleccionadas] = useState([]);
   const [mensaje, setMensaje] = useState('');
   const [inventario, setInventario] = useState([]);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
   
-  // ESTADO PARA CONTROLAR SI ESTAMOS EDITANDO UN PRODUCTO EXISTENTE
   const [editandoId, setEditandoId] = useState(null);
 
   const cargarInventario = async () => {
-    const { data, error } = await supabase.from('pijamas').select('*');
+    const { data, error } = await supabase.from('inventario').select('*');
     if (!error && data) {
-      setInventario(data);
+      const bannerRow = data.find(item => item.personaje === 'CONFIG_BANNER');
+      if (bannerRow) {
+        setBannerConfig({
+          descripcion: bannerRow.descripcion || bannerConfig.descripcion,
+          precio: bannerRow.precio || bannerConfig.precio
+        });
+      }
+      const productosReales = data.filter(item => item.personaje !== 'CONFIG_BANNER');
+      setInventario(productosReales);
     }
   };
 
@@ -30,6 +46,82 @@ function Admin() {
     setFormulario({ ...formulario, [e.target.name]: e.target.value });
   };
 
+  const manejarCambioBanner = (e) => {
+    setBannerConfig({ ...bannerConfig, [e.target.name]: e.target.value });
+  };
+
+  const guardarBannerEnDB = async (e) => {
+    e.preventDefault();
+    setMensaje('⏳ Guardando configuración del banner...');
+
+    try {
+      const { data: existente } = await supabase
+        .from('inventario')
+        .select('id')
+        .eq('personaje', 'CONFIG_BANNER')
+        .maybeSingle();
+
+      let errorOperacion = null;
+
+      if (existente) {
+        const { error } = await supabase
+          .from('inventario')
+          .update({
+            descripcion: bannerConfig.descripcion,
+            precio: bannerConfig.precio // Guardado separado en su columna
+          })
+          .eq('personaje', 'CONFIG_BANNER');
+        errorOperacion = error;
+      } else {
+        const { error } = await supabase
+          .from('inventario')
+          .insert([{
+            personaje: 'CONFIG_BANNER',
+            descripcion: bannerConfig.descripcion,
+            precio: bannerConfig.precio
+          }]);
+        errorOperacion = error;
+      }
+
+      if (errorOperacion) {
+        setMensaje('❌ Error al actualizar el banner: ' + errorOperacion.message);
+      } else {
+        setMensaje('✅ ¡Banner actualizado con éxito en la tienda!');
+        cargarInventario();
+      }
+    } catch (err) {
+      setMensaje('❌ Ocurrió un error inesperado: ' + err.message);
+    }
+  };
+
+  const manejarSubidaArchivo = async (e) => {
+    const archivo = e.target.files[0];
+    if (!archivo) return;
+
+    setSubiendoFoto(true);
+    setMensaje('⏳ Subiendo foto a la nube...');
+
+    const nombreArchivo = `${Date.now()}-${archivo.name}`;
+
+    const { error: errorSubida } = await supabase.storage
+      .from('pijamas')
+      .upload(nombreArchivo, archivo);
+
+    if (errorSubida) {
+      setMensaje('❌ Error al subir la foto: ' + errorSubida.message);
+      setSubiendoFoto(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('pijamas')
+      .getPublicUrl(nombreArchivo);
+
+    setFormulario({ ...formulario, imagen: urlData.publicUrl });
+    setSubiendoFoto(false);
+    setMensaje('✅ ¡Foto cargada con éxito en la nube!');
+  };
+
   const manejarTallas = (e) => {
     const talla = e.target.value;
     if (tallasSeleccionadas.includes(talla)) {
@@ -39,43 +131,47 @@ function Admin() {
     }
   };
 
-  // PREPARAR EL FORMULARIO PARA EDITAR UNA PIJAMA
   const iniciarEdicion = (pijama) => {
     setEditandoId(pijama.id);
     setFormulario({
       personaje: pijama.personaje || '',
       descripcion: pijama.descripcion || '',
       precio: pijama.precio || '',
-      imagen: pijama.imagen || ''
+      imagen: pijama.imagen || '',
+      categoria: pijama.categoria || 'Dama',
+      seccion_destino: pijama.seccion_destino || 'Promos'
     });
     setTallasSeleccionadas(pijama.tallas || []);
     setMensaje(`✏️ Editando a: ${pijama.personaje}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // CANCELAR LA EDICIÓN Y LIMPIAR
   const cancelarEdicion = () => {
     setEditandoId(null);
-    setFormulario({ personaje: '', descripcion: '', precio: '', imagen: '' });
+    setFormulario({ personaje: '', descripcion: '', precio: '', imagen: '', categoria: 'Dama', seccion_destino: 'Promos' });
     setTallasSeleccionadas([]);
     setMensaje('');
   };
 
-  // GUARDAR (CREAR NUEVO O ACTUALIZAR EXISTENTE)
   const guardarPijama = async (e) => {
     e.preventDefault();
-    setMensaje('Guardando en la nube...');
+    if (!formulario.imagen) {
+      alert('Por favor espera a que se cargue la foto o selecciona una.');
+      return;
+    }
+    setMensaje('Guardando en la base de datos...');
 
     if (editandoId) {
-      // ACTUALIZAR (UPDATE)
       const { error } = await supabase
-        .from('pijamas')
+        .from('inventario')
         .update({
           personaje: formulario.personaje,
           descripcion: formulario.descripcion,
           precio: formulario.precio,
           imagen: formulario.imagen,
-          tallas: tallasSeleccionadas
+          tallas: tallasSeleccionadas,
+          categoria: formulario.categoria,
+          seccion_destino: formulario.seccion_destino
         })
         .eq('id', editandoId);
 
@@ -87,16 +183,17 @@ function Admin() {
         cargarInventario();
       }
     } else {
-      // CREAR NUEVO (INSERT)
       const { error } = await supabase
-        .from('pijamas')
+        .from('inventario')
         .insert([
           {
             personaje: formulario.personaje,
             descripcion: formulario.descripcion,
             precio: formulario.precio,
             imagen: formulario.imagen,
-            tallas: tallasSeleccionadas
+            tallas: tallasSeleccionadas,
+            categoria: formulario.categoria,
+            seccion_destino: formulario.seccion_destino
           }
         ]);
 
@@ -104,7 +201,7 @@ function Admin() {
         setMensaje('❌ Error al guardar: ' + error.message);
       } else {
         setMensaje('✅ ¡Pijama guardada con éxito en la base de datos!');
-        setFormulario({ personaje: '', descripcion: '', precio: '', imagen: '' });
+        setFormulario({ personaje: '', descripcion: '', precio: '', imagen: '', categoria: 'Dama', seccion_destino: 'Promos' });
         setTallasSeleccionadas([]);
         cargarInventario();
       }
@@ -114,7 +211,7 @@ function Admin() {
   const eliminarPijama = async (id, nombre) => {
     const confirmar = window.confirm(`¿Estás segura de que deseas eliminar la pijama "${nombre}"?`);
     if (confirmar) {
-      const { error } = await supabase.from('pijamas').delete().eq('id', id);
+      const { error } = await supabase.from('inventario').delete().eq('id', id);
       if (error) {
         setMensaje('❌ Error al eliminar: ' + error.message);
       } else {
@@ -125,12 +222,25 @@ function Admin() {
     }
   };
 
+  const estiloSelect = {
+    width: '100%',
+    padding: '0.9rem',
+    borderRadius: '10px',
+    border: '1.5px solid #C98286',
+    boxSizing: 'border-box',
+    backgroundColor: '#FFFFFF',
+    color: '#2D2223',
+    fontWeight: 'bold',
+    fontSize: '1rem',
+    cursor: 'pointer'
+  };
+
   return (
     <div style={{ backgroundColor: '#FAF7F2', minHeight: '100vh', padding: '3rem 1.5rem', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto', backgroundColor: '#FFF', padding: '2.5rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
         
         <h2 style={{ color: '#2D2223', marginTop: 0, fontSize: '2rem', fontWeight: '900' }}>Inventario Boutique 🛠️</h2>
-        <p style={{ color: '#64748B', marginBottom: '2rem' }}>Sube nueva mercancía, actualiza precios, imágenes o edita las tallas disponibles.</p>
+        <p style={{ color: '#64748B', marginBottom: '2rem' }}>Sube mercancía, toma o selecciona fotos directamente y organiza tu tienda.</p>
 
         {mensaje && (
           <div style={{ padding: '1rem', backgroundColor: mensaje.includes('❌') ? '#FEE2E2' : '#ECFCCB', color: '#1F2937', borderRadius: '12px', marginBottom: '1.5rem', fontWeight: 'bold' }}>
@@ -138,25 +248,78 @@ function Admin() {
           </div>
         )}
 
+        {/* SECCIÓN BANNER */}
+        <div style={{ marginBottom: '3rem', padding: '1.5rem', border: '1.5px dashed #C98286', borderRadius: '16px', backgroundColor: '#FAF7F2' }}>
+          <h3 style={{ color: '#2D2223', marginTop: 0, fontSize: '1.25rem', fontWeight: 'bold' }}>📢 Modificar Banner de Promociones</h3>
+          <form onSubmit={guardarBannerEnDB} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', marginTop: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Texto Principal del Banner</label>
+              <textarea name="descripcion" value={bannerConfig.descripcion} onChange={manejarCambioBanner} required style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FFF', color: '#2D2223', minHeight: '80px' }} />
+            </div>
+            
+            <div style={{ backgroundColor: '#FFF', padding: '1rem', borderRadius: '12px', border: '1px solid #C98286' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#8B2635' }}>🚀 Texto Destacado / Envío Gratis (Fuera del recuadro principal)</label>
+              <input type="text" name="precio" value={bannerConfig.precio} onChange={manejarCambioBanner} required style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FAF7F2', color: '#2D2223', fontWeight: 'bold' }} />
+            </div>
+
+            <button type="submit" style={{ backgroundColor: '#2D2223', color: '#FFF', padding: '1rem', borderRadius: '50px', fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: '1rem' }}>
+              Guardar Banner en la Tienda
+            </button>
+          </form>
+        </div>
+
+        {/* FORMULARIO DE PRODUCTOS / PIJAMAS */}
         <form onSubmit={guardarPijama} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', marginBottom: '3rem' }}>
           <div>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Nombre de la Pijama *</label>
-            <input type="text" name="personaje" value={formulario.personaje} onChange={manejarCambio} required placeholder="Ej. Pijama Vaca Muu" style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #C98286', boxSizing: 'border-box' }} />
+            <input type="text" name="personaje" value={formulario.personaje} onChange={manejarCambio} required placeholder="Ej. Pijama Vaca Muu" style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FFF', color: '#2D2223' }} />
           </div>
 
           <div>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Descripción corta *</label>
-            <textarea name="descripcion" value={formulario.descripcion} onChange={manejarCambio} required placeholder="Material térmico, extrasuave..." style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #C98286', boxSizing: 'border-box', minHeight: '80px' }} />
+            <textarea name="descripcion" value={formulario.descripcion} onChange={manejarCambio} required placeholder="Material térmico, el descanso que mereces con estilo..." style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FFF', color: '#2D2223', minHeight: '80px' }} />
           </div>
 
           <div>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Precio *</label>
-            <input type="text" name="precio" value={formulario.precio} onChange={manejarCambio} required placeholder="Ej. $69.900" style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #C98286', boxSizing: 'border-box' }} />
+            <input type="text" name="precio" value={formulario.precio} onChange={manejarCambio} required placeholder="Ej. $69.900" style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FFF', color: '#2D2223' }} />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Ruta o URL de la Imagen *</label>
-            <input type="text" name="imagen" value={formulario.imagen} onChange={manejarCambio} required placeholder="Ej. /vaca.jpeg o link de imagen" style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #C98286', boxSizing: 'border-box' }} />
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Foto de la Pijama (Subir archivo o tomar foto) *</label>
+            <input 
+              type="file" 
+              accept="image/*" 
+              onChange={manejarSubidaArchivo} 
+              style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #C98286', boxSizing: 'border-box', backgroundColor: '#FFF0F1', cursor: 'pointer' }} 
+            />
+            {subiendoFoto && <p style={{ fontSize: '0.85rem', color: '#D97706', marginTop: '5px' }}>Subiendo imagen a la nube...</p>}
+            {formulario.imagen && !subiendoFoto && (
+              <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <img src={formulario.imagen} alt="Vista previa" style={{ width: '60px', height: '60px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #C98286' }} />
+                <span style={{ fontSize: '0.85rem', color: '#16A34A', fontWeight: 'bold' }}>✓ Foto lista en la nube</span>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>Categoría *</label>
+            <select name="categoria" value={formulario.categoria} onChange={manejarCambio} style={estiloSelect}>
+              <option value="Dama">Pijamas Dama</option>
+              <option value="Caballero">Pijamas Caballero</option>
+              <option value="Niñas">Pijamas Niñas</option>
+              <option value="Niños">Pijamas Niños</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#2D2223' }}>¿Dónde debe aparecer este producto? *</label>
+            <select name="seccion_destino" value={formulario.seccion_destino} onChange={manejarCambio} style={estiloSelect}>
+              <option value="Promos">Sección de Promociones (Flash)</option>
+              <option value="Principal">Página Principal (Catálogo General)</option>
+              <option value="Ambas">Ambas Páginas</option>
+              <option value="Bodega">Solo Bodega (Oculto)</option>
+            </select>
           </div>
 
           <div>
@@ -195,7 +358,7 @@ function Admin() {
                 <div>
                   <h4 style={{ margin: 0, fontWeight: 'bold', color: '#2D2223' }}>{pijama.personaje}</h4>
                   <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748B' }}>
-                    Precio: {pijama.precio} | Tallas: {pijama.tallas ? pijama.tallas.join(', ') : 'Ninguna'}
+                    Cat: {pijama.categoria || 'Dama'} | Precio: {pijama.precio} | 📍 Destino: <span style={{ fontWeight: 'bold', color: '#8B2635' }}>{pijama.seccion_destino || 'Promos'}</span>
                   </p>
                 </div>
               </div>

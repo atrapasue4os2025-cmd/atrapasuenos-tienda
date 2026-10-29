@@ -19,14 +19,33 @@ function App() {
   const [pijamasAdultos, setPijamasAdultos] = useState([]);
   const [pijamasNinos, setPijamasNinos] = useState([]);
   
+  // Estado para el banner administrable
+  const [bannerConfig, setBannerConfig] = useState({
+    descripcion: '• 1 Pijama: Envío estándar ($15.000)\n• 2 Pijamas: Envío $19.900\n• 3 o más Pijamas: 10% DE DESCUENTO + ENVÍO GRATIS',
+    precio: '🚀 ¡Lleva 2 o más pijamas y el envío es totalmente GRATIS!'
+  });
+  
   useEffect(() => {
     const obtenerInventario = async () => {
-      const { data, error } = await supabase.from('pijamas').select('*');
+      // Conectado a la tabla 'inventario' tal como acordamos
+      const { data, error } = await supabase.from('inventario').select('*');
       
       if (!error && data) {
-        const ninos = data.filter(pijama => pijama.tallas && Array.isArray(pijama.tallas) && pijama.tallas.some(t => t.includes('Talla')));
-        const adultos = data.filter(pijama => pijama.tallas && Array.isArray(pijama.tallas) && !pijama.tallas.some(t => t.includes('Talla')));
-        const sinClasificar = data.filter(pijama => !ninos.includes(pijama) && !adultos.includes(pijama));
+        // Extraer la configuración del banner si existe en la base de datos
+        const bannerRow = data.find(item => item.personaje === 'CONFIG_BANNER');
+        if (bannerRow) {
+          setBannerConfig({
+            descripcion: bannerRow.descripcion || bannerConfig.descripcion,
+            precio: bannerRow.precio || bannerConfig.precio
+          });
+        }
+
+        // Filtrar productos reales excluyendo el banner y bodega
+        const productosValidos = data.filter(item => item.personaje !== 'CONFIG_BANNER' && item.seccion_destino !== 'Bodega');
+
+        const ninos = productosValidos.filter(pijama => pijama.tallas && Array.isArray(pijama.tallas) && pijama.tallas.some(t => t.includes('Talla')));
+        const adultos = productosValidos.filter(pijama => pijama.tallas && Array.isArray(pijama.tallas) && !pijama.tallas.some(t => t.includes('Talla')));
+        const sinClasificar = productosValidos.filter(pijama => !ninos.includes(pijama) && !adultos.includes(pijama));
 
         setPijamasNinos(ninos);
         setPijamasAdultos([...adultos, ...sinClasificar]);
@@ -84,7 +103,7 @@ function App() {
 
   const manejarChangeInput = (e) => setFormulario({ ...formulario, [e.target.name]: e.target.value });
 
-  const formatearDinero = (valor) => "$" + valor.toLocaleString('es-CO');
+  const formatearDinero = (valor) => "$" + Number(valor || 0).toLocaleString('es-CO');
 
   const limpiarPrecioNumerico = (precioStr) => {
     if (!precioStr) return 0;
@@ -122,7 +141,7 @@ function App() {
 
     const detalleProductos = carrito.map((item, index) => {
       const precioLimpio = formatearDinero(limpiarPrecioNumerico(item.precio));
-      return `   ${index + 1}. *${item.personaje}* (Talla: ${item.talla}) - ${precioLimpio}`;
+      return `   ${index + 1}. *${item.personaje} (Talla: ${item.talla})* — ${precioLimpio}`;
     }).join('\n');
 
     const mensaje = `🛒 *¡NUEVO PEDIDO - ATRAPASUEÑOS BOUTIQUE!* ✨
@@ -130,19 +149,19 @@ function App() {
 📦 *PRODUCTOS EN EL COMBO (${cantidadPrendas}):*
 ${detalleProductos}
 
-• *Subtotal:* ${formatearDinero(subtotalPrendas)}
-${porcentajeDescuento > 0 ? `• *Descuento de Combo (${porcentajeDescuento * 100}%):* -${formatearDinero(descuentoMonto)}\n` : ''}• *Envío:* ${envioGratis ? '¡GRATIS! 🚀' : formatearDinero(costoEnvio)}
-• *TOTAL A PAGAR:* *${formatearDinero(totalFinalPagar)}*
+- *Subtotal:* ${formatearDinero(subtotalPrendas)}
+${porcentajeDescuento > 0 ? `- *Descuento de Combo (${porcentajeDescuento * 100}%):* -${formatearDinero(descuentoMonto)}\n` : ''}- *Envío:* ${envioGratis ? '¡GRATIS! 🚀' : formatearDinero(costoEnvio)}
+- *TOTAL A PAGAR:* *${formatearDinero(totalFinalPagar)}*
 
 👤 *DATOS DE DESPACHO:*
-• *Nombre:* ${formulario.nombre}
-• *Cédula:* ${formulario.cedula}
-• *Celular:* ${formulario.celular}
-• *Ciudad / Municipio:* ${formulario.ciudad}
-• *Dirección:* ${formulario.direccion}
+- *Nombre:* ${formulario.nombre}
+- *Cédula:* ${formulario.cedula}
+- *Celular:* ${formulario.celular}
+- *Ciudad / Municipio:* ${formulario.ciudad}
+- *Dirección:* ${formulario.direccion}
 
 💳 *MÉTODO DE PAGO:*
-• ${formulario.metodoPago}`;
+- ${formulario.metodoPago}`;
 
     const url = `https://wa.me/${CONFIG.telefono}?text=${encodeURIComponent(mensaje)}`;
     window.open(url, '_blank');
@@ -226,18 +245,23 @@ ${porcentajeDescuento > 0 ? `• *Descuento de Combo (${porcentajeDescuento * 10
         <img src={CONFIG.urlLogo} alt="Atrapasueños Boutique" style={{ height: '170px', width: 'auto', objectFit: 'contain', marginBottom: '0.8rem' }} />
         
         <p style={{ margin: 0, color: colores.blancoBoutique, fontSize: '1.15rem', fontWeight: '900', letterSpacing: '2.5px', textTransform: 'uppercase', textShadow: '0 2px 4px rgba(45, 34, 35, 0.3)' }}>
-          ✨ Viste tus sueños — Duerme con estilo ✨
+          ✨ Viste tus sueños  Duerme con estilo ✨
         </p>
       </header>
 
-      {/* BANNER PROMOCIÓN ACTUALIZADO */}
+      {/* BANNER PROMOCIÓN DINÁMICO */}
       <div className="banner-animado" style={{ backgroundColor: colores.blancoBoutique, border: `3px solid ${colores.doradoPulido}`, padding: '2.5rem 2rem', textAlign: 'center', maxWidth: '750px', margin: '3rem auto', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
         <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.8rem', fontWeight: '900', color: colores.rojoVinoPromos }}>🔥 PROMOCIÓN POR UNIDADES LIMITADAS 🔥</h2>
-        <p style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: colores.espressoOscuro, lineHeight: '1.6' }}>
-          • 1 Pijama: Envío estándar ($15.000)<br />
-          • 2 Pijamas: Envío $19.900<br />
-          • 3 o más Pijamas: <span style={{ backgroundColor: colores.rojoVinoPromos, color: colores.blancoBoutique, padding: '4px 12px', borderRadius: '6px', display: 'inline-block', margin: '4px 0' }}>10% DE DESCUENTO + ENVÍO GRATIS</span> 🚀
+        <p style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: colores.espressoOscuro, lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+          {bannerConfig.descripcion}
         </p>
+        {bannerConfig.precio && (
+          <div style={{ marginTop: '15px' }}>
+            <span style={{ backgroundColor: colores.rojoVinoPromos, color: colores.blancoBoutique, padding: '6px 14px', borderRadius: '8px', display: 'inline-block', fontSize: '1.1rem' }}>
+              {bannerConfig.precio}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* BOTONES DE NAVEGACIÓN */}
@@ -458,7 +482,7 @@ ${porcentajeDescuento > 0 ? `• *Descuento de Combo (${porcentajeDescuento * 10
       {/* FOOTER */}
       <footer style={{ textAlign: 'center', padding: '4rem 1.5rem', marginTop: '6rem', backgroundColor: colores.rojoVinoPromos, color: colores.blancoBoutique }}>
         <p style={{ fontSize: '1.6rem', fontWeight: '900', color: colores.doradoPulido, margin: 0 }}>Atrapasueños Boutique</p>
-        <p style={{ fontSize: '1.1rem', marginTop: '1rem', opacity: 0.9 }}>Líneas de atención: 3004146250 - 3028346988</p>
+        <p style={{ fontSize: '1.1rem', marginTop: '1.0rem', opacity: 0.9 }}>Líneas de atención: 3004146250 - 3028346988</p>
       </footer>
     </div>
   );
